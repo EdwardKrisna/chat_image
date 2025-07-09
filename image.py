@@ -8,7 +8,7 @@ import time
 
 # --- Page Configuration ---
 st.set_page_config(
-    page_title="Gemini 2.0 Vision & Generation Chat",
+    page_title="i-mage",
     page_icon="🤖",
     layout="wide"
 )
@@ -44,7 +44,7 @@ except Exception as e:
     st.stop()
 
 # --- Sidebar Configuration ---
-st.sidebar.title("🤖 Gemini Settings")
+st.sidebar.title("🤖 i-mage Settings")
 
 # Model info
 st.sidebar.info("**Model:** gemini-2.0-flash-preview-image-generation")
@@ -85,13 +85,12 @@ if 'messages' not in st.session_state:
     st.session_state['messages'] = []
 
 # --- Main Interface ---
-st.title("🤖 Gemini 2.0 Vision & Generation Chat")
-st.write("Chat with **Gemini 2.0 Flash Preview** for conversational image generation and vision analysis!")
+st.title("🤖 i-mage")
 
 # Help expander
 with st.expander("ℹ️ How to use this app"):
     st.markdown("""
-    **Gemini 2.0 Flash Preview Features:**
+    **i-mage Features:**
     - **Conversational image generation**: Just describe what you want
     - **Image editing**: Upload an image and ask to modify it
     - **Vision analysis**: Ask questions about uploaded images
@@ -282,23 +281,3 @@ if 'current_image' in st.session_state:
     st.sidebar.markdown(f"**Image:** {st.session_state.get('image_filename', 'Uploaded')} ✅")
 else:
     st.sidebar.markdown("**Image:** None")
-
-# Model capabilities
-st.sidebar.markdown("---")
-st.sidebar.markdown("### 🎯 Gemini 2.0 Capabilities")
-st.sidebar.markdown("""
-**Strengths:**
-- Conversational AI with context
-- World knowledge integration
-- Multi-turn image editing
-- Vision analysis & understanding
-- Text + image generation
-- Realistic image details
-
-**Best for:**
-- Creative image generation
-- Image editing workflows
-- Educational content
-- Contextual understanding
-- Multi-modal conversations
-""")
