@@ -43,21 +43,25 @@ image_model = st.sidebar.selectbox(
     help="Model for image generation"
 )
 
-# Image upload for vision analysis
-uploaded_file = st.sidebar.file_uploader(
-    "Upload an image (for vision analysis)", 
+# Image upload for chat
+uploaded_file = st.file_uploader(
+    "📷 Upload an image to include in your message", 
     type=["png", "jpg", "jpeg", "webp"],
-    help="Upload an image to analyze with your text message"
+    help="Upload an image to send with your next message"
 )
 
 if uploaded_file:
     img_bytes = uploaded_file.read()
-    st.sidebar.image(img_bytes, caption="Uploaded image", use_container_width=True)
+    st.image(img_bytes, caption="Image ready to send", width=300)
     mime = uploaded_file.type
     b64 = base64.b64encode(img_bytes).decode('utf-8')
-    st.session_state['image_data_uri'] = f"data:{mime};base64,{b64}"
+    st.session_state['pending_image'] = {
+        'data': f"data:{mime};base64,{b64}",
+        'bytes': img_bytes,
+        'name': uploaded_file.name
+    }
 else:
-    st.session_state.pop('image_data_uri', None)
+    st.session_state.pop('pending_image', None)
 
 # Clear chat button
 if st.sidebar.button("🗑️ Clear Chat"):
@@ -86,6 +90,15 @@ for i, msg in enumerate(st.session_state['messages']):
                 )
             except Exception as e:
                 st.error(f"Error displaying image: {e}")
+        elif msg.get("type") == "user_image":
+            # Display user uploaded image
+            try:
+                decoded_image = base64.b64decode(msg["image_data"])
+                st.image(decoded_image, caption=msg.get("image_name", "Uploaded Image"), width=300)
+                if msg.get("content"):
+                    st.write(msg["content"])
+            except Exception as e:
+                st.error(f"Error displaying user image: {e}")
         else:
             st.write(msg["content"])
 
@@ -93,12 +106,31 @@ for i, msg in enumerate(st.session_state['messages']):
 user_input = st.chat_input("Type your message or use '/generate [prompt]' to create images...")
 
 if user_input:
-    # Display user message
+    # Check if user has uploaded an image
+    has_image = 'pending_image' in st.session_state
+    
+    # Display user message with image if present
     with st.chat_message("user"):
-        st.write(user_input)
+        if has_image:
+            st.image(st.session_state['pending_image']['bytes'], 
+                    caption=st.session_state['pending_image']['name'], 
+                    width=300)
+        if user_input.strip():  # Only show text if there's actual content
+            st.write(user_input)
     
     # Add user message to history
-    st.session_state['messages'].append({'role': 'user', 'content': user_input})
+    if has_image:
+        # Store image data in base64 for history
+        image_b64 = base64.b64encode(st.session_state['pending_image']['bytes']).decode('utf-8')
+        st.session_state['messages'].append({
+            'role': 'user',
+            'type': 'user_image',
+            'content': user_input if user_input.strip() else "",
+            'image_data': image_b64,
+            'image_name': st.session_state['pending_image']['name']
+        })
+    else:
+        st.session_state['messages'].append({'role': 'user', 'content': user_input})
 
     # ---- IMAGE GENERATION COMMAND ----
     if user_input.lower().startswith("/generate "):
@@ -188,8 +220,12 @@ if user_input:
     # ---- VISION ANALYSIS OR REGULAR CHAT ----
     else:
         try:
-            # Check if user uploaded an image for analysis
-            if 'image_data_uri' in st.session_state:
+            # Check if user uploaded an image with this message
+            if has_image:
+                # Clear the pending image after using it
+                image_data_uri = st.session_state['pending_image']['data']
+                st.session_state.pop('pending_image', None)
+                
                 with st.spinner("Analyzing image..."):
                     # Use vision capabilities for image analysis
                     response = client.chat.completions.create(
@@ -198,11 +234,11 @@ if user_input:
                             {
                                 "role": "user",
                                 "content": [
-                                    {"type": "text", "text": user_input},
+                                    {"type": "text", "text": user_input if user_input.strip() else "What do you see in this image?"},
                                     {
                                         "type": "image_url",
                                         "image_url": {
-                                            "url": st.session_state['image_data_uri']
+                                            "url": image_data_uri
                                         }
                                     }
                                 ]
@@ -217,20 +253,33 @@ if user_input:
                     st.write(reply)
                     
             else:
-                # Regular text chat
+                # Regular text chat - include recent message history for context
+                chat_messages = [
+                    {
+                        "role": "system", 
+                        "content": "You are a helpful AI assistant. You can chat about any topic and help users with various tasks. When users want to generate images, they should use the /generate command."
+                    }
+                ]
+                
+                # Add recent messages for context (last 10 text messages)
+                recent_messages = []
+                for msg in st.session_state['messages'][-20:]:  # Look at last 20 messages
+                    if msg.get("type") == "user_image":
+                        # For user images, include the text part only
+                        if msg.get("content"):
+                            recent_messages.append({"role": "user", "content": f"[Image uploaded] {msg['content']}"})
+                        else:
+                            recent_messages.append({"role": "user", "content": "[Image uploaded without text]"})
+                    elif msg.get("type") != "image":  # Exclude generated images
+                        recent_messages.append({"role": msg["role"], "content": msg["content"]})
+                
+                # Take only the last 10 for context
+                chat_messages.extend(recent_messages[-10:])
+                
                 with st.spinner("Thinking..."):
                     response = client.chat.completions.create(
                         model=chat_model,
-                        messages=[
-                            {
-                                "role": "system", 
-                                "content": "You are a helpful AI assistant. You can chat about any topic and help users with various tasks. When users want to generate images, they should use the /generate command."
-                            }
-                        ] + [
-                            {"role": msg["role"], "content": msg["content"]} 
-                            for msg in st.session_state['messages'][-10:]  # Keep last 10 messages for context
-                            if msg.get("type") != "image"  # Exclude image messages from chat context
-                        ],
+                        messages=chat_messages,
                         max_tokens=1000
                     )
                 reply = response.choices[0].message.content
@@ -254,18 +303,21 @@ if user_input:
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 📖 How to Use")
 st.sidebar.markdown("""
-**Text Chat:**
-- Just type your message normally
+**Image Analysis:**
+- Upload an image above the chat input
+- Send it with or without text
+- AI will analyze the image and respond
 
 **Image Generation:**
 - Use `/generate [your prompt]`
 - Example: `/generate a sunset over mountains`
 
-**Image Analysis:**
-- Upload an image in the sidebar
-- Ask questions about the uploaded image
+**Text Chat:**
+- Just type your message normally
+- Context is maintained across messages
 
 **Tips:**
+- Images are analyzed immediately when sent
 - Be specific in your image prompts
 - Try different models for different results
 - DALL-E 3 generally produces better quality images
@@ -277,10 +329,11 @@ st.sidebar.markdown("### 🔧 Current Settings")
 st.sidebar.markdown(f"**Chat Model:** {chat_model}")
 st.sidebar.markdown(f"**Image Model:** {image_model}")
 st.sidebar.markdown(f"**Messages:** {len(st.session_state.get('messages', []))}")
-if 'image_data_uri' in st.session_state:
-    st.sidebar.markdown("**Uploaded Image:** ✅ Ready for analysis")
+pending_image = st.session_state.get('pending_image')
+if pending_image:
+    st.sidebar.markdown("**Pending Image:** ✅ Ready to send")
 else:
-    st.sidebar.markdown("**Uploaded Image:** ❌ None")
+    st.sidebar.markdown("**Pending Image:** ❌ None")
 
 # Debug info (toggle)
 if st.sidebar.checkbox("🐛 Show Debug Info"):
@@ -289,6 +342,6 @@ if st.sidebar.checkbox("🐛 Show Debug Info"):
         "chat_model": chat_model,
         "image_model": image_model,
         "messages_count": len(st.session_state.get('messages', [])),
-        "has_uploaded_image": 'image_data_uri' in st.session_state,
+        "has_pending_image": 'pending_image' in st.session_state,
         "logged_in": st.session_state.get('logged_in', False)
     })
