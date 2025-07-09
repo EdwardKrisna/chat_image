@@ -37,7 +37,8 @@ uploaded_file = st.sidebar.file_uploader(
 )
 
 if uploaded_file:
-    st.sidebar.image(uploaded_file, caption="Uploaded image", use_column_width=True)
+    # Display uploaded file with the updated parameter
+    st.sidebar.image(uploaded_file, caption="Uploaded image", use_container_width=True)
     img_bytes = uploaded_file.read()
     b64 = base64.b64encode(img_bytes).decode('utf-8')
     st.session_state['image_data_uri'] = f"data:image/png;base64,{b64}"
