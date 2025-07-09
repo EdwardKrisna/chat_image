@@ -19,7 +19,7 @@ if 'logged_in' not in st.session_state:
 
 if not st.session_state['logged_in']:
     st.title("🔒 Login Required")
-    st.write("Please enter your credentials to access the Gemini 2.0 Chat.")
+    st.write("Please enter your credentials to access i-mage.")
     
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
