@@ -1,9 +1,8 @@
 import base64
-import requests
 from openai import OpenAI
 import streamlit as st
 
-# Page config
+# --- Page config ---
 st.set_page_config(page_title="OpenAI Image Chat", page_icon="🤖", layout="wide")
 
 # --- Login ---
@@ -22,66 +21,66 @@ if not st.session_state['logged_in']:
             st.error("Invalid credentials, please try again.")
     st.stop()
 
-# --- Authenticated ---
+# --- Authenticated session ---
 client = OpenAI(api_key=st.secrets["api_key"])
 
 st.sidebar.title("Settings")
 model = st.sidebar.selectbox(
-    "Choose model", 
+    "Choose model",
     ["gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano"]
 )
 
-# Upload an image for vision analysis
 uploaded_file = st.sidebar.file_uploader(
-    "Upload an image", type=["png", "jpg", "jpeg"]
+    "Upload an image (for vision analysis)", type=["png", "jpg", "jpeg"]
 )
 
 if uploaded_file:
     img_bytes = uploaded_file.read()
     st.sidebar.image(img_bytes, caption="Uploaded image", use_container_width=True)
+    mime = uploaded_file.type
     b64 = base64.b64encode(img_bytes).decode('utf-8')
-    st.session_state['image_data_uri'] = f"data:image/png;base64,{b64}"
+    st.session_state['image_data_uri'] = f"data:{mime};base64,{b64}"
 else:
     st.session_state.pop('image_data_uri', None)
 
-# Initialize chat history
 if 'messages' not in st.session_state:
     st.session_state['messages'] = []
 
-# Display chat messages (with image support for assistant)
+# --- Display chat history, with image support for assistant ---
 for msg in st.session_state['messages']:
     with st.chat_message(msg['role']):
         if msg.get("type") == "image":
-            st.image(msg["content"], caption=msg.get("caption", ""), use_container_width=True)
+            # Display from raw base64 if present
+            st.image(base64.b64decode(msg["content"]), caption=msg.get("caption", ""), use_container_width=True)
         else:
             st.write(msg["content"])
 
-# Chat input
+# --- Chat input ---
 user_input = st.chat_input("Your message...")
 if user_input:
     st.session_state['messages'].append({'role': 'user', 'content': user_input})
 
-    # IMAGE GENERATION COMMAND using RESPONSES API
+    # ---- IMAGE GENERATION COMMAND using RESPONSES API ----
     if user_input.lower().startswith("/generate "):
         prompt = user_input[len("/generate "):].strip()
-        response = client.responses.create(
-            model=model,
-            input=prompt,
-            tools=[{"type": "image_generation"}]
-        )
-        # Get base64 image output
-        image_data = [
-            output.result
-            for output in response.output
-            if output.type == "image_generation_call"
-        ]
+        with st.spinner("Generating image..."):
+            response = client.responses.create(
+                model=model,
+                input=prompt,
+                tools=[{"type": "image_generation"}]
+            )
+            # Extract base64 image output
+            image_data = [
+                output.result
+                for output in response.output
+                if output.type == "image_generation_call"
+            ]
         if image_data:
             image_base64 = image_data[0]
-            # Display in chat
             st.session_state['messages'].append({
                 'role': 'assistant',
                 'type': 'image',
-                'content': f"data:image/png;base64,{image_base64}",
+                'content': image_base64,
                 'caption': "Generated Image"
             })
             with st.chat_message("assistant"):
@@ -99,23 +98,41 @@ if user_input:
             })
             st.chat_message("assistant").write("No image was generated.")
 
-    # VISION-CAPABLE OR TEXT-ONLY CHAT (old code)
+    # ---- VISION/ANALYSIS OR TEXT CHAT ----
     else:
-        system_msg = {"role": "system", "content": "You are a helpful assistant that can analyze images and chat."}
+        # If user uploaded an image, send it for analysis
         if 'image_data_uri' in st.session_state:
-            user_content = [
-                {"type": "text",      "text": user_input},
-                {"type": "image_url", "image_url": {"url": st.session_state['image_data_uri']}}
+            vision_input = [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": user_input},
+                        {
+                            "type": "input_image",
+                            "image_url": st.session_state['image_data_uri']
+                        }
+                    ]
+                }
             ]
+            with st.spinner("Analyzing image..."):
+                response = client.responses.create(
+                    model=model,
+                    input=vision_input,
+                )
+            # The vision output is always text (output_text)
+            reply = response.output_text
         else:
-            user_content = user_input
+            # Text-only chat
+            with st.spinner("Thinking..."):
+                response = client.chat.completions.create(
+                    model=model,
+                    messages=[
+                        {"role": "system", "content": "You are a helpful assistant that can analyze images and chat."},
+                        {"role": "user", "content": user_input}
+                    ]
+                )
+            reply = response.choices[0].message.content
 
-        # Use Chat Completions API for text/vision
-        resp = client.chat.completions.create(
-            model=model,
-            messages=[system_msg, {"role": "user", "content": user_content}]
-        )
-        assistant_msg = resp.choices[0].message.content
-        st.session_state['messages'].append({'role': 'assistant', 'content': assistant_msg})
+        st.session_state['messages'].append({'role': 'assistant', 'content': reply})
         with st.chat_message("assistant"):
-            st.write(assistant_msg)
+            st.write(reply)
