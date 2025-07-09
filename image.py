@@ -3,14 +3,14 @@ from openai import OpenAI
 import streamlit as st
 
 # --- Page config ---
-st.set_page_config(page_title="OpenAI Image Chat", page_icon="🤖", layout="wide")
+st.set_page_config(page_title="i-mage", page_icon="🤖", layout="wide")
 
 # --- Login ---
 if 'logged_in' not in st.session_state:
     st.session_state['logged_in'] = False
 
 if not st.session_state['logged_in']:
-    st.title("🔒 Login")
+    st.title("🔒 i-mage Login")
     user = st.text_input("Username")
     pwd = st.text_input("Password", type="password")
     if st.button("Login"):
@@ -24,7 +24,7 @@ if not st.session_state['logged_in']:
 # --- Authenticated session ---
 client = OpenAI(api_key=st.secrets["api_key"])
 
-st.title("🤖 OpenAI Image Chat")
+st.title("🤖 i-mage")
 st.write("Chat with AI and generate images! Use `/generate [prompt]` to create images.")
 
 st.sidebar.title("⚙️ Settings")
