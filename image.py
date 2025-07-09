@@ -46,10 +46,6 @@ except Exception as e:
 # --- Sidebar Configuration ---
 st.sidebar.title("🤖 i-mage Settings")
 
-# Model info
-st.sidebar.info("**Model:** gemini-2.0-flash-preview-image-generation")
-st.sidebar.markdown("💡 Gemini 2.0 excels at conversational image generation, editing, and vision analysis with world knowledge.")
-
 # Image upload for vision analysis
 st.sidebar.subheader("📸 Image Upload")
 uploaded_file = st.sidebar.file_uploader(
