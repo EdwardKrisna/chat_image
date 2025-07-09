@@ -25,9 +25,14 @@ if not st.session_state['logged_in']:
 client = OpenAI(api_key=st.secrets["api_key"])
 
 st.sidebar.title("Settings")
+
+# Only include models that support image generation
+IMAGE_GENERATION_MODELS = ["gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano"]
+
 model = st.sidebar.selectbox(
     "Choose model",
-    ["gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano"]
+    IMAGE_GENERATION_MODELS,
+    help="These models support image generation"
 )
 
 uploaded_file = st.sidebar.file_uploader(
@@ -50,89 +55,152 @@ if 'messages' not in st.session_state:
 for msg in st.session_state['messages']:
     with st.chat_message(msg['role']):
         if msg.get("type") == "image":
-            # Display from raw base64 if present
-            st.image(base64.b64decode(msg["content"]), caption=msg.get("caption", ""), use_container_width=True)
+            try:
+                st.image(base64.b64decode(msg["content"]), caption=msg.get("caption", ""), use_container_width=True)
+            except Exception as e:
+                st.error(f"Error displaying image: {e}")
         else:
             st.write(msg["content"])
 
 # --- Chat input ---
-user_input = st.chat_input("Your message...")
+user_input = st.chat_input("Your message... (Use '/generate [prompt]' to create images)")
+
 if user_input:
+    # Display user message
+    with st.chat_message("user"):
+        st.write(user_input)
     st.session_state['messages'].append({'role': 'user', 'content': user_input})
 
     # ---- IMAGE GENERATION COMMAND using RESPONSES API ----
     if user_input.lower().startswith("/generate "):
         prompt = user_input[len("/generate "):].strip()
+        
+        if not prompt:
+            st.error("Please provide a prompt after /generate")
+            st.stop()
+            
         with st.spinner("Generating image..."):
-            response = client.responses.create(
-                model=model,
-                input=prompt,
-                tools=[{"type": "image_generation"}]
-            )
-            # Extract base64 image output
-            image_data = [
-                output.result
-                for output in response.output
-                if output.type == "image_generation_call"
-            ]
-        if image_data:
-            image_base64 = image_data[0]
-            st.session_state['messages'].append({
-                'role': 'assistant',
-                'type': 'image',
-                'content': image_base64,
-                'caption': "Generated Image"
-            })
-            with st.chat_message("assistant"):
-                st.image(base64.b64decode(image_base64), caption="Generated Image", use_container_width=True)
-                st.download_button(
-                    label="Download Generated Image",
-                    data=base64.b64decode(image_base64),
-                    file_name="generated.png",
-                    mime="image/png"
+            try:
+                response = client.responses.create(
+                    model=model,
+                    input=prompt,
+                    tools=[{"type": "image_generation"}]
                 )
-        else:
-            st.session_state['messages'].append({
-                'role': 'assistant',
-                'content': 'No image was generated.'
-            })
-            st.chat_message("assistant").write("No image was generated.")
+                
+                # Debug: Show the response structure
+                st.sidebar.write("Debug - Response keys:", list(response.__dict__.keys()) if hasattr(response, '__dict__') else "No dict")
+                
+                # Extract base64 image output with better error handling
+                image_data = []
+                if hasattr(response, 'output') and response.output:
+                    for output in response.output:
+                        if hasattr(output, 'type') and output.type == "image_generation_call":
+                            if hasattr(output, 'result'):
+                                image_data.append(output.result)
+                            else:
+                                st.sidebar.write("Debug - Output has no 'result' attribute")
+                        else:
+                            st.sidebar.write(f"Debug - Output type: {getattr(output, 'type', 'No type attribute')}")
+                else:
+                    st.sidebar.write("Debug - No output attribute or empty output")
+                
+                if image_data:
+                    image_base64 = image_data[0]
+                    
+                    # Validate base64 data
+                    try:
+                        decoded_image = base64.b64decode(image_base64)
+                        st.session_state['messages'].append({
+                            'role': 'assistant',
+                            'type': 'image',
+                            'content': image_base64,
+                            'caption': f"Generated: {prompt[:50]}..."
+                        })
+                        
+                        with st.chat_message("assistant"):
+                            st.image(decoded_image, caption=f"Generated: {prompt[:50]}...", use_container_width=True)
+                            st.download_button(
+                                label="Download Generated Image",
+                                data=decoded_image,
+                                file_name="generated.png",
+                                mime="image/png"
+                            )
+                    except Exception as decode_error:
+                        st.error(f"Error decoding base64 image: {decode_error}")
+                        st.session_state['messages'].append({
+                            'role': 'assistant',
+                            'content': f'Image generation completed but failed to decode: {decode_error}'
+                        })
+                else:
+                    error_msg = 'No image was generated. This might be due to content policy restrictions or model limitations.'
+                    st.session_state['messages'].append({
+                        'role': 'assistant',
+                        'content': error_msg
+                    })
+                    with st.chat_message("assistant"):
+                        st.write(error_msg)
+                        
+            except Exception as e:
+                error_msg = f"Error generating image: {str(e)}"
+                st.error(error_msg)
+                st.session_state['messages'].append({
+                    'role': 'assistant',
+                    'content': error_msg
+                })
 
     # ---- VISION/ANALYSIS OR TEXT CHAT ----
     else:
-        # If user uploaded an image, send it for analysis
-        if 'image_data_uri' in st.session_state:
-            vision_input = [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "input_text", "text": user_input},
-                        {
-                            "type": "input_image",
-                            "image_url": st.session_state['image_data_uri']
-                        }
-                    ]
-                }
-            ]
-            with st.spinner("Analyzing image..."):
-                response = client.responses.create(
-                    model=model,
-                    input=vision_input,
-                )
-            # The vision output is always text (output_text)
-            reply = response.output_text
-        else:
-            # Text-only chat
-            with st.spinner("Thinking..."):
-                response = client.chat.completions.create(
-                    model=model,
-                    messages=[
-                        {"role": "system", "content": "You are a helpful assistant that can analyze images and chat."},
-                        {"role": "user", "content": user_input}
-                    ]
-                )
-            reply = response.choices[0].message.content
+        try:
+            # If user uploaded an image, send it for analysis
+            if 'image_data_uri' in st.session_state:
+                vision_input = [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "input_text", "text": user_input},
+                            {
+                                "type": "input_image",
+                                "image_url": st.session_state['image_data_uri']
+                            }
+                        ]
+                    }
+                ]
+                with st.spinner("Analyzing image..."):
+                    response = client.responses.create(
+                        model=model,
+                        input=vision_input,
+                    )
+                # The vision output is always text (output_text)
+                reply = response.output_text
+            else:
+                # Text-only chat
+                with st.spinner("Thinking..."):
+                    response = client.chat.completions.create(
+                        model=model,
+                        messages=[
+                            {"role": "system", "content": "You are a helpful assistant that can analyze images and chat."},
+                            {"role": "user", "content": user_input}
+                        ]
+                    )
+                reply = response.choices[0].message.content
 
-        st.session_state['messages'].append({'role': 'assistant', 'content': reply})
-        with st.chat_message("assistant"):
-            st.write(reply)
+            st.session_state['messages'].append({'role': 'assistant', 'content': reply})
+            with st.chat_message("assistant"):
+                st.write(reply)
+                
+        except Exception as e:
+            error_msg = f"Error in chat: {str(e)}"
+            st.error(error_msg)
+            st.session_state['messages'].append({
+                'role': 'assistant',
+                'content': error_msg
+            })
+
+# --- Debug info in sidebar ---
+if st.sidebar.checkbox("Show Debug Info"):
+    st.sidebar.write("Current model:", model)
+    st.sidebar.write("Messages count:", len(st.session_state.get('messages', [])))
+    if 'image_data_uri' in st.session_state:
+        st.sidebar.write("Image uploaded: Yes")
+    else:
+        st.sidebar.write("Image uploaded: No")
