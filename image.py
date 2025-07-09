@@ -146,71 +146,125 @@ if user_input:
         else:
             with st.spinner(f"Generating image with {image_model}..."):
                 try:
-                    # Generate image using Images API
-                    response = client.images.generate(
-                        model=image_model,
-                        prompt=prompt,
-                        size="1024x1024" if image_model == "dall-e-3" else "512x512",
-                        quality="standard" if image_model == "dall-e-3" else None,
-                        n=1,
-                        response_format="b64_json"
-                    )
+                    # Clean and validate the prompt
+                    clean_prompt = prompt.strip()
                     
-                    # Get the base64 image
-                    image_base64 = response.data[0].b64_json
-                    
-                    # Validate base64 data
-                    try:
-                        decoded_image = base64.b64decode(image_base64)
-                        
-                        # Add to message history
-                        st.session_state['messages'].append({
-                            'role': 'assistant',
-                            'type': 'image',
-                            'content': image_base64,
-                            'caption': f"Generated with {image_model}: {prompt[:50]}{'...' if len(prompt) > 50 else ''}"
-                        })
-                        
-                        # Display the generated image
+                    # Basic content filtering (expand as needed)
+                    blocked_words = ['nude', 'naked', 'nsfw', 'explicit', 'sexual', 'gore', 'violence', 'blood', 'weapon', 'gun', 'knife']
+                    if any(word in clean_prompt.lower() for word in blocked_words):
+                        error_msg = "⚠️ Your prompt contains content that may violate OpenAI's usage policies. Please try a different prompt."
                         with st.chat_message("assistant"):
-                            st.success(f"✅ Image generated successfully with {image_model}!")
-                            st.image(
-                                decoded_image, 
-                                caption=f"Prompt: {prompt}", 
-                                use_container_width=True
-                            )
-                            
-                            # Download button
-                            st.download_button(
-                                label="💾 Download Generated Image",
-                                data=decoded_image,
-                                file_name=f"generated_{len(st.session_state['messages'])}.png",
-                                mime="image/png",
-                                type="primary"
-                            )
-                            
-                            # Show revised prompt if available (DALL-E 3)
-                            if hasattr(response.data[0], 'revised_prompt') and response.data[0].revised_prompt:
-                                with st.expander("🎨 See Revised Prompt"):
-                                    st.write(response.data[0].revised_prompt)
-                                    
-                    except Exception as decode_error:
-                        error_msg = f"❌ Error decoding generated image: {decode_error}"
-                        with st.chat_message("assistant"):
-                            st.error(error_msg)
+                            st.warning(error_msg)
                         st.session_state['messages'].append({
                             'role': 'assistant',
                             'content': error_msg
                         })
+                    else:
+                        # Generate image using Images API
+                        response = client.images.generate(
+                            model=image_model,
+                            prompt=clean_prompt,
+                            size="1024x1024" if image_model == "dall-e-3" else "512x512",
+                            quality="standard" if image_model == "dall-e-3" else None,
+                            n=1,
+                            response_format="b64_json"
+                        )
+                        
+                        # Get the base64 image
+                        image_base64 = response.data[0].b64_json
+                        
+                        # Validate base64 data
+                        try:
+                            decoded_image = base64.b64decode(image_base64)
+                            
+                            # Add to message history
+                            st.session_state['messages'].append({
+                                'role': 'assistant',
+                                'type': 'image',
+                                'content': image_base64,
+                                'caption': f"Generated with {image_model}: {clean_prompt[:50]}{'...' if len(clean_prompt) > 50 else ''}"
+                            })
+                            
+                            # Display the generated image
+                            with st.chat_message("assistant"):
+                                st.success(f"✅ Image generated successfully with {image_model}!")
+                                st.image(
+                                    decoded_image, 
+                                    caption=f"Prompt: {clean_prompt}", 
+                                    use_container_width=True
+                                )
+                                
+                                # Download button
+                                st.download_button(
+                                    label="💾 Download Generated Image",
+                                    data=decoded_image,
+                                    file_name=f"generated_{len(st.session_state['messages'])}.png",
+                                    mime="image/png",
+                                    type="primary"
+                                )
+                                
+                                # Show revised prompt if available (DALL-E 3)
+                                if hasattr(response.data[0], 'revised_prompt') and response.data[0].revised_prompt:
+                                    with st.expander("🎨 See Revised Prompt"):
+                                        st.write(response.data[0].revised_prompt)
+                                        
+                        except Exception as decode_error:
+                            error_msg = f"❌ Error decoding generated image: {decode_error}"
+                            with st.chat_message("assistant"):
+                                st.error(error_msg)
+                            st.session_state['messages'].append({
+                                'role': 'assistant',
+                                'content': error_msg
+                            })
                         
                 except Exception as e:
-                    error_msg = f"❌ Error generating image: {str(e)}"
-                    with st.chat_message("assistant"):
-                        st.error(error_msg)
-                        if "billing" in str(e).lower():
-                            st.info("💡 This might be a billing issue. Check your OpenAI account credits.")
-                        elif "rate" in str(e).lower():
-                            st.info("💡 You might be hitting rate limits. Try again in a moment.")
+                    error_str = str(e)
+                    
+                    # More specific error handling
+                    if "image_generation_user_error" in error_str:
+                        error_msg = "⚠️ **Content Policy Error**: Your prompt may violate OpenAI's usage policies. Try rephrasing with:\n\n"
+                        error_msg += "• More descriptive, positive language\n"
+                        error_msg += "• Avoid potentially sensitive topics\n"
+                        error_msg += "• Focus on artistic, creative descriptions\n\n"
+                        error_msg += "**Example**: Instead of 'scary monster', try 'friendly cartoon character'"
+                        
+                        with st.chat_message("assistant"):
+                            st.warning("Content Policy Issue")
+                            st.markdown(error_msg)
+                            
+                        # Suggest alternative prompts
+                        st.info("💡 **Suggested alternatives:**")
+                        suggestions = [
+                            f"a beautiful landscape with {prompt.split()[-1] if prompt.split() else 'nature'}",
+                            f"an artistic illustration of {prompt.split()[0] if prompt.split() else 'something beautiful'}",
+                            f"a colorful cartoon version of {prompt[:20]}..."
+                        ]
+                        for i, suggestion in enumerate(suggestions, 1):
+                            st.write(f"{i}. `/generate {suggestion}`")
+                            
+                    elif "billing" in error_str.lower() or "quota" in error_str.lower():
+                        error_msg = "💳 **Billing Issue**: Your OpenAI account may be out of credits or have billing issues."
+                        with st.chat_message("assistant"):
+                            st.error(error_msg)
+                            st.info("💡 Check your OpenAI account at https://platform.openai.com/account/billing")
+                            
+                    elif "rate" in error_str.lower() or "limit" in error_str.lower():
+                        error_msg = "⏱️ **Rate Limit**: You're making requests too quickly. Please wait a moment and try again."
+                        with st.chat_message("assistant"):
+                            st.warning(error_msg)
+                            st.info("💡 Try again in 10-20 seconds")
+                            
+                    elif "model" in error_str.lower():
+                        error_msg = f"🤖 **Model Error**: There might be an issue with the {image_model} model."
+                        with st.chat_message("assistant"):
+                            st.error(error_msg)
+                            st.info("💡 Try switching to a different model in the sidebar")
+                            
+                    else:
+                        error_msg = f"❌ **Unknown Error**: {error_str}"
+                        with st.chat_message("assistant"):
+                            st.error(error_msg)
+                            st.info("💡 Try rephrasing your prompt or check your internet connection")
                     
                     st.session_state['messages'].append({
                         'role': 'assistant',
