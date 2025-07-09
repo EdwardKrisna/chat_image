@@ -60,7 +60,7 @@ if model_type == "Gemini (Vision & Generation)":
 else:
     imagen_model = st.sidebar.selectbox(
         "Select Imagen Model",
-        ["imagen-4.0-generate-preview-06-06", "imagen-3.0-generate-preview", "imagen-4.0-ultra-generate-preview"],
+        ["imagen-4.0-generate-preview-06-06", "imagen-3.0-generate-002", "imagen-4.0-ultra-generate-preview"],
         index=0,
         help="Choose the Imagen model version"
     )
