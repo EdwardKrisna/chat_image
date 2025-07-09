@@ -144,10 +144,124 @@ if user_input:
                 'content': 'Please provide a prompt after /generate. Example: `/generate a cat sitting on a table`'
             })
         else:
+            # Check for different types of image generation requests
+            is_recreation = any(word in prompt.lower() for word in ["recreate", "upload", "this image"])
+            is_editing = any(word in prompt.lower() for word in ["edit", "remove", "add", "change", "modify", "without", "dont include", "don't include"])
+            
+            if (is_recreation or is_editing) and has_image:
+                # Handle image recreation or editing
+                image_data_uri = st.session_state['pending_image']['data']
+                
+                with st.spinner("Analyzing uploaded image..."):
+                    try:
+                        if is_editing:
+                            # For editing, create a more specific analysis prompt
+                            analysis_prompt = f"Describe this image in detail for art generation purposes. Include all elements, colors, composition, style, subjects, lighting, and mood. Be very specific about objects, people, and background elements. This description will be used to recreate the image with modifications: {prompt}"
+                        else:
+                            # For recreation, use general analysis
+                            analysis_prompt = "Describe this image in detail for art generation purposes. Include colors, composition, style, subjects, lighting, and mood. Be very descriptive and artistic."
+                        
+                        # First, analyze the uploaded image
+                        describe_response = client.chat.completions.create(
+                            model=chat_model,
+                            messages=[
+                                {
+                                    "role": "user",
+                                    "content": [
+                                        {"type": "text", "text": analysis_prompt},
+                                        {
+                                            "type": "image_url",
+                                            "image_url": {
+                                                "url": image_data_uri
+                                            }
+                                        }
+                                    ]
+                                }
+                            ],
+                            max_tokens=500
+                        )
+                        
+                        description = describe_response.choices[0].message.content
+                        
+                        # Process the editing request
+                        if is_editing:
+                            # Create a more sophisticated editing prompt
+                            editing_instruction = prompt.replace("edit the image", "").replace("edit", "").strip()
+                            
+                            # Use AI to create a better generation prompt
+                            edit_prompt_response = client.chat.completions.create(
+                                model=chat_model,
+                                messages=[
+                                    {
+                                        "role": "system",
+                                        "content": "You are an expert at creating image generation prompts. Given an image description and editing instructions, create a new detailed prompt that incorporates the changes."
+                                    },
+                                    {
+                                        "role": "user",
+                                        "content": f"Original image description: {description}\n\nEditing instruction: {editing_instruction}\n\nCreate a new detailed prompt for image generation that keeps the original elements but applies the requested changes. Be specific and artistic."
+                                    }
+                                ],
+                                max_tokens=300
+                            )
+                            
+                            generation_prompt = edit_prompt_response.choices[0].message.content
+                            
+                            # Show the editing process to user
+                            with st.chat_message("assistant"):
+                                st.info("🎨 **Editing Process:**")
+                                st.write(f"**Original Description:** {description[:200]}...")
+                                st.write(f"**Edit Request:** {editing_instruction}")
+                                st.write(f"**New Generation Prompt:** {generation_prompt[:200]}...")
+                                st.write("**Now generating edited image...**")
+                        else:
+                            # For recreation
+                            generation_prompt = f"Create an artistic recreation of: {description}"
+                            
+                            # Show the description to user
+                            with st.chat_message("assistant"):
+                                st.info("🔍 **Analyzing your image...**")
+                                st.write(f"**Description:** {description}")
+                                st.write("**Now generating a similar image...**")
+                        
+                    except Exception as e:
+                        error_msg = f"❌ Error analyzing image: {str(e)}"
+                        with st.chat_message("assistant"):
+                            st.error(error_msg)
+                        st.session_state['messages'].append({
+                            'role': 'assistant',
+                            'content': error_msg
+                        })
+                        st.stop()
+                        
+            elif (is_recreation or is_editing) and not has_image:
+                # No image uploaded but user wants to recreate/edit
+                with st.chat_message("assistant"):
+                    st.warning("🖼️ **No Image to Edit/Recreate**")
+                    st.write("To edit or recreate an image, please:")
+                    st.write("1. Upload an image using the file uploader above")
+                    st.write("2. Then use editing commands like:")
+                    st.write("   • `/generate edit the image, remove the car`")
+                    st.write("   • `/generate recreate this image in cartoon style`")
+                    st.write("   • `/generate modify the image, make it sunny`")
+                
+                st.session_state['messages'].append({
+                    'role': 'assistant',
+                    'content': 'To edit or recreate an image, please upload one first, then use the /generate command with your editing instructions.'
+                })
+                st.stop()
+            
+            else:
+                # Regular text-to-image generation
+                generation_prompt = prompt
+            
+            # Clear the pending image after using it for recreation/editing
+            if has_image and (is_recreation or is_editing):
+                st.session_state.pop('pending_image', None)
+            
             with st.spinner(f"Generating image with {image_model}..."):
                 try:
                     # Clean and validate the prompt
-                    clean_prompt = prompt.strip()
+                    clean_prompt = generation_prompt.strip()
                     
                     # Basic content filtering (expand as needed)
                     blocked_words = ['nude', 'naked', 'nsfw', 'explicit', 'sexual', 'gore', 'violence', 'blood', 'weapon', 'gun', 'knife']
@@ -235,9 +349,9 @@ if user_input:
                         # Suggest alternative prompts
                         st.info("💡 **Suggested alternatives:**")
                         suggestions = [
-                            f"a beautiful landscape with {prompt.split()[-1] if prompt.split() else 'nature'}",
-                            f"an artistic illustration of {prompt.split()[0] if prompt.split() else 'something beautiful'}",
-                            f"a colorful cartoon version of {prompt[:20]}..."
+                            "a beautiful artistic scene with similar elements",
+                            "a creative interpretation in watercolor style",
+                            "a modern digital art version with vibrant colors"
                         ]
                         for i, suggestion in enumerate(suggestions, 1):
                             st.write(f"{i}. `/generate {suggestion}`")
@@ -357,10 +471,18 @@ if user_input:
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 📖 How to Use")
 st.sidebar.markdown("""
-**Image Analysis:**
+**Image Editing:**
 - Upload an image above the chat input
-- Send it with or without text
-- AI will analyze the image and respond
+- Use editing commands like:
+  - `/generate edit the image, remove the helicopter`
+  - `/generate modify the image, make it sunny`
+  - `/generate edit this image, add a rainbow`
+  - `/generate change the image, make it nighttime`
+
+**Image Recreation:**
+- Upload an image and use:
+  - `/generate recreate this image`
+  - `/generate recreate this image in cartoon style`
 
 **Image Generation:**
 - Use `/generate [your prompt]`
@@ -371,8 +493,7 @@ st.sidebar.markdown("""
 - Context is maintained across messages
 
 **Tips:**
-- Images are analyzed immediately when sent
-- Be specific in your image prompts
+- Be specific in your editing instructions
 - Try different models for different results
 - DALL-E 3 generally produces better quality images
 """)
