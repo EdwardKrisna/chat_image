@@ -55,7 +55,7 @@ model_type = st.sidebar.selectbox(
 )
 
 if model_type == "Gemini (Vision & Generation)":
-    model = "gemini-2.0-flash-preview-image-generation"
+    model = "gemini-2.5-flash-lite-preview-06-17"
     st.sidebar.info("💡 Gemini excels at contextual image generation and editing with conversational abilities.")
 else:
     imagen_model = st.sidebar.selectbox(
