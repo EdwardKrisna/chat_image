@@ -17,7 +17,7 @@ if not st.session_state['logged_in']:
     if st.button("Login"):
         if user == st.secrets["user"] and pwd == st.secrets["password"]:
             st.session_state['logged_in'] = True
-            st.rerun()  # replaced experimental_rerun
+            st.rerun()
         else:
             st.error("Invalid credentials, please try again.")
     st.stop()
@@ -37,9 +37,9 @@ uploaded_file = st.sidebar.file_uploader(
 )
 
 if uploaded_file:
-    # Display uploaded file with the updated parameter
-    st.sidebar.image(uploaded_file, caption="Uploaded image", use_container_width=True)
+    # Read file into bytes and display reliably
     img_bytes = uploaded_file.read()
+    st.sidebar.image(img_bytes, caption="Uploaded image", use_container_width=True)
     b64 = base64.b64encode(img_bytes).decode('utf-8')
     st.session_state['image_data_uri'] = f"data:image/png;base64,{b64}"
 else:
