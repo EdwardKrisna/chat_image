@@ -71,7 +71,6 @@ if user_input:
         st.write(user_input)
     st.session_state['messages'].append({'role': 'user', 'content': user_input})
 
-    # ---- IMAGE GENERATION COMMAND using RESPONSES API ----
     if user_input.lower().startswith("/generate "):
         prompt = user_input[len("/generate "):].strip()
         
@@ -79,67 +78,37 @@ if user_input:
             st.error("Please provide a prompt after /generate")
             st.stop()
             
-        with st.spinner("Generating image..."):
+        with st.spinner("Generating image with DALL-E 3..."):
             try:
-                response = client.responses.create(
-                    model=model,
-                    input=prompt,
-                    tools=[{"type": "image_generation"}]
+                response = client.images.generate(
+                    model="dall-e-3",
+                    prompt=prompt,
+                    size="1024x1024",
+                    quality="standard",
+                    n=1,
+                    response_format="b64_json"
                 )
                 
-                # Debug: Show the response structure
-                st.sidebar.write("Debug - Response keys:", list(response.__dict__.keys()) if hasattr(response, '__dict__') else "No dict")
+                image_base64 = response.data[0].b64_json
+                decoded_image = base64.b64decode(image_base64)
                 
-                # Extract base64 image output with better error handling
-                image_data = []
-                if hasattr(response, 'output') and response.output:
-                    for output in response.output:
-                        if hasattr(output, 'type') and output.type == "image_generation_call":
-                            if hasattr(output, 'result'):
-                                image_data.append(output.result)
-                            else:
-                                st.sidebar.write("Debug - Output has no 'result' attribute")
-                        else:
-                            st.sidebar.write(f"Debug - Output type: {getattr(output, 'type', 'No type attribute')}")
-                else:
-                    st.sidebar.write("Debug - No output attribute or empty output")
+                st.session_state['messages'].append({
+                    'role': 'assistant',
+                    'type': 'image',
+                    'content': image_base64,
+                    'caption': f"Generated: {prompt[:50]}..."
+                })
                 
-                if image_data:
-                    image_base64 = image_data[0]
+                with st.chat_message("assistant"):
+                    st.success("Image generated successfully with DALL-E 3!")
+                    st.image(decoded_image, caption=f"Generated: {prompt[:50]}...", use_container_width=True)
+                    st.download_button(
+                        label="Download Generated Image",
+                        data=decoded_image,
+                        file_name="generated.png",
+                        mime="image/png"
+                    )
                     
-                    # Validate base64 data
-                    try:
-                        decoded_image = base64.b64decode(image_base64)
-                        st.session_state['messages'].append({
-                            'role': 'assistant',
-                            'type': 'image',
-                            'content': image_base64,
-                            'caption': f"Generated: {prompt[:50]}..."
-                        })
-                        
-                        with st.chat_message("assistant"):
-                            st.image(decoded_image, caption=f"Generated: {prompt[:50]}...", use_container_width=True)
-                            st.download_button(
-                                label="Download Generated Image",
-                                data=decoded_image,
-                                file_name="generated.png",
-                                mime="image/png"
-                            )
-                    except Exception as decode_error:
-                        st.error(f"Error decoding base64 image: {decode_error}")
-                        st.session_state['messages'].append({
-                            'role': 'assistant',
-                            'content': f'Image generation completed but failed to decode: {decode_error}'
-                        })
-                else:
-                    error_msg = 'No image was generated. This might be due to content policy restrictions or model limitations.'
-                    st.session_state['messages'].append({
-                        'role': 'assistant',
-                        'content': error_msg
-                    })
-                    with st.chat_message("assistant"):
-                        st.write(error_msg)
-                        
             except Exception as e:
                 error_msg = f"Error generating image: {str(e)}"
                 st.error(error_msg)
