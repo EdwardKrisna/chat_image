@@ -1,14 +1,15 @@
 import base64
 import streamlit as st
-from openai import OpenAI
-import io
+from google import genai
+from google.genai import types
 from PIL import Image
+import io
 import time
 
 # --- Page Configuration ---
 st.set_page_config(
-    page_title="OpenAI Vision & Image Generation Chat",
-    page_icon="🎨",
+    page_title="Gemini & Imagen Vision Chat",
+    page_icon="🤖",
     layout="wide"
 )
 
@@ -18,7 +19,7 @@ if 'logged_in' not in st.session_state:
 
 if not st.session_state['logged_in']:
     st.title("🔒 Login Required")
-    st.write("Please enter your credentials to access the OpenAI Vision & Image Generation Chat.")
+    st.write("Please enter your credentials to access the Gemini & Imagen Chat.")
     
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
@@ -28,7 +29,6 @@ if not st.session_state['logged_in']:
             login_button = st.form_submit_button("Login", use_container_width=True)
             
             if login_button:
-                # In a real app, you'd validate against your authentication system
                 if username == st.secrets.get("username", "admin") and password == st.secrets.get("password", "admin"):
                     st.session_state['logged_in'] = True
                     st.rerun()
@@ -36,122 +36,147 @@ if not st.session_state['logged_in']:
                     st.error("❌ Invalid credentials. Please try again.")
     st.stop()
 
-# --- Initialize OpenAI Client ---
+# --- Initialize Google GenAI Client ---
 try:
-    client = OpenAI(api_key=st.secrets["openai_api_key"])
+    client = genai.Client(api_key=st.secrets["google_api_key"])
 except Exception as e:
-    st.error("❌ OpenAI API key not found. Please configure your secrets.")
+    st.error("❌ Google API key not found. Please configure your secrets.")
     st.stop()
 
 # --- Sidebar Configuration ---
-st.sidebar.title("🎨 Chat Settings")
+st.sidebar.title("🤖 Chat Settings")
 
 # Model selection
-model = st.sidebar.selectbox(
-    "Select Model",
-    ["gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano", "gpt-4o", "gpt-4o-mini"],
+model_type = st.sidebar.selectbox(
+    "Select Model Type",
+    ["Gemini (Vision & Generation)", "Imagen (Specialized Generation)"],
     index=0,
-    help="Choose the OpenAI model for processing"
+    help="Choose between Gemini for conversational image generation or Imagen for specialized image generation"
 )
 
-# Image upload for vision analysis
-st.sidebar.subheader("📸 Image Upload")
-uploaded_file = st.sidebar.file_uploader(
-    "Upload image for analysis",
-    type=["png", "jpg", "jpeg", "webp", "gif"],
-    help="Upload an image to analyze with vision capabilities"
-)
-
-# Image detail level
-detail_level = st.sidebar.selectbox(
-    "Image Detail Level",
-    ["auto", "low", "high"],
-    index=0,
-    help="Choose processing detail level for images"
-)
-
-# Display uploaded image
-if uploaded_file:
-    img_bytes = uploaded_file.read()
-    st.sidebar.image(img_bytes, caption="Uploaded Image", use_container_width=True)
-    
-    # Convert to base64 for API
-    mime_type = uploaded_file.type
-    b64_image = base64.b64encode(img_bytes).decode('utf-8')
-    st.session_state['current_image'] = {
-        'data_uri': f"data:{mime_type};base64,{b64_image}",
-        'filename': uploaded_file.name,
-        'size': len(img_bytes)
-    }
-    
-    st.sidebar.success(f"✅ Image loaded ({len(img_bytes)} bytes)")
+if model_type == "Gemini (Vision & Generation)":
+    model = "gemini-2.0-flash-preview-image-generation"
+    st.sidebar.info("💡 Gemini excels at contextual image generation and editing with conversational abilities.")
 else:
-    st.session_state.pop('current_image', None)
+    imagen_model = st.sidebar.selectbox(
+        "Select Imagen Model",
+        ["imagen-4.0-generate-preview-06-06", "imagen-3.0-generate-preview", "imagen-4.0-ultra-generate-preview"],
+        index=0,
+        help="Choose the Imagen model version"
+    )
+    model = imagen_model
+    st.sidebar.info("💡 Imagen excels at photorealistic images, artistic styles, and specialized editing.")
+
+# Image upload for vision analysis (Gemini only)
+if model_type == "Gemini (Vision & Generation)":
+    st.sidebar.subheader("📸 Image Upload")
+    uploaded_file = st.sidebar.file_uploader(
+        "Upload image for analysis/editing",
+        type=["png", "jpg", "jpeg", "webp"],
+        help="Upload an image for Gemini to analyze or edit"
+    )
+    
+    if uploaded_file:
+        img_bytes = uploaded_file.read()
+        st.sidebar.image(img_bytes, caption="Uploaded Image", use_container_width=True)
+        
+        # Store PIL image for Gemini
+        st.session_state['current_image'] = Image.open(io.BytesIO(img_bytes))
+        st.sidebar.success(f"✅ Image loaded ({len(img_bytes)} bytes)")
+    else:
+        st.session_state.pop('current_image', None)
 
 # Image generation settings
-st.sidebar.subheader("🎨 Image Generation")
-image_size = st.sidebar.selectbox(
-    "Image Size",
-    ["1024x1024", "1024x1536", "1536x1024", "1792x1024", "1024x1792"],
-    index=0
-)
+st.sidebar.subheader("🎨 Generation Settings")
 
-image_quality = st.sidebar.selectbox(
-    "Image Quality",
-    ["auto", "low", "medium", "high"],
-    index=0
-)
+if model_type == "Imagen (Specialized Generation)":
+    num_images = st.sidebar.slider(
+        "Number of Images",
+        min_value=1,
+        max_value=4 if "ultra" not in model else 1,
+        value=1 if "ultra" in model else 2,
+        help="Number of images to generate (Imagen 4 Ultra: max 1)"
+    )
+    
+    aspect_ratio = st.sidebar.selectbox(
+        "Aspect Ratio",
+        ["1:1", "3:4", "4:3", "9:16", "16:9"],
+        index=0,
+        help="Choose the aspect ratio for generated images"
+    )
+    
+    person_generation = st.sidebar.selectbox(
+        "Person Generation",
+        ["allow_adult", "dont_allow", "allow_all"],
+        index=0,
+        help="Control whether to generate images with people"
+    )
+else:
+    st.sidebar.info("Gemini uses conversational settings - just describe what you want!")
 
 # --- Initialize Chat History ---
 if 'messages' not in st.session_state:
     st.session_state['messages'] = []
 
 # --- Main Interface ---
-st.title("🎨 OpenAI Vision & Image Generation Chat")
-st.write("Chat with AI that can analyze images and generate new ones!")
+st.title("🤖 Gemini & Imagen Vision Chat")
+st.write(f"Chat with AI using **{model_type}** for vision analysis and image generation!")
 
 # Help expander
 with st.expander("ℹ️ How to use this app"):
     st.markdown("""
-    **Vision Analysis:**
-    - Upload an image in the sidebar
-    - Ask questions about the image
-    - The AI can describe, analyze, and answer questions about visual content
+    **Gemini Model Features:**
+    - Conversational image generation and editing
+    - Upload images for analysis and modification
+    - Multi-turn editing: "Turn this car into a convertible", "Now change the color to yellow"
+    - Contextual understanding with world knowledge
+    - Interleaved text and image outputs
     
-    **Image Generation:**
-    - Type `/generate [description]` to create images
-    - Example: `/generate a sunset over mountains`
-    - Use `/edit [description]` to modify the last generated image
+    **Imagen Model Features:**
+    - Specialized high-quality image generation
+    - Photorealistic and artistic styles
+    - Multiple images per request (except Ultra)
+    - Configurable aspect ratios and generation settings
+    - Best for product design, logos, and detailed artwork
     
-    **Supported Features:**
-    - Multiple image formats (PNG, JPEG, WebP, GIF)
-    - High-quality image generation with GPT Image model
-    - Vision analysis with configurable detail levels
-    - Multi-turn conversations with context
+    **Commands:**
+    - `/generate [description]` - Generate images
+    - `/edit [description]` - Edit uploaded images (Gemini only)
+    - Regular chat works too - just describe what you want!
     """)
 
 # --- Display Chat History ---
 for i, msg in enumerate(st.session_state['messages']):
     with st.chat_message(msg['role']):
         if msg.get('type') == 'image':
-            st.image(
-                base64.b64decode(msg['content']),
-                caption=msg.get('caption', 'Generated Image'),
-                use_container_width=True
-            )
-            # Download button for generated images
-            st.download_button(
-                label="⬇️ Download Image",
-                data=base64.b64decode(msg['content']),
-                file_name=f"generated_image_{i}.png",
-                mime="image/png",
-                key=f"download_{i}"
-            )
+            if isinstance(msg['content'], list):
+                # Multiple images
+                cols = st.columns(min(len(msg['content']), 3))
+                for j, img_data in enumerate(msg['content']):
+                    with cols[j % 3]:
+                        st.image(img_data, caption=f"Generated Image {j+1}", use_container_width=True)
+                        st.download_button(
+                            label="⬇️ Download",
+                            data=img_data,
+                            file_name=f"generated_image_{i}_{j}.png",
+                            mime="image/png",
+                            key=f"download_{i}_{j}"
+                        )
+            else:
+                # Single image
+                st.image(msg['content'], caption=msg.get('caption', 'Generated Image'), use_container_width=True)
+                st.download_button(
+                    label="⬇️ Download Image",
+                    data=msg['content'],
+                    file_name=f"generated_image_{i}.png",
+                    mime="image/png",
+                    key=f"download_{i}"
+                )
         else:
             st.write(msg['content'])
 
 # --- Chat Input ---
-user_input = st.chat_input("Type your message or '/generate [description]' to create an image...")
+user_input = st.chat_input("Type your message or describe what you want to generate...")
 
 if user_input:
     # Add user message to chat
@@ -160,123 +185,157 @@ if user_input:
     with st.chat_message("user"):
         st.write(user_input)
     
-    # --- IMAGE GENERATION ---
-    if user_input.lower().startswith('/generate '):
-        prompt = user_input[len('/generate '):].strip()
-        
-        if not prompt:
-            st.error("Please provide a description for image generation.")
-        else:
-            with st.chat_message("assistant"):
-                with st.spinner("🎨 Generating image..."):
-                    try:
-                        response = client.responses.create(
-                            model=model,
-                            input=f"Generate an image: {prompt}",
-                            tools=[{
-                                "type": "image_generation",
-                                "size": image_size,
-                                "quality": image_quality
-                            }]
+    # --- IMAGEN IMAGE GENERATION ---
+    if model_type == "Imagen (Specialized Generation)":
+        with st.chat_message("assistant"):
+            with st.spinner("🎨 Generating images with Imagen..."):
+                try:
+                    response = client.models.generate_images(
+                        model=model,
+                        prompt=user_input,
+                        config=types.GenerateImagesConfig(
+                            number_of_images=num_images,
+                            aspect_ratio=aspect_ratio,
+                            person_generation=person_generation
                         )
-                        
-                        # Extract generated image
-                        image_data = [
-                            output.result
-                            for output in response.output
-                            if output.type == "image_generation_call"
-                        ]
-                        
-                        if image_data:
-                            image_base64 = image_data[0]
-                            
-                            # Store in session state
+                    )
+                    
+                    generated_images = []
+                    for generated_image in response.generated_images:
+                        # Convert PIL image to bytes
+                        img_buffer = io.BytesIO()
+                        generated_image.image.save(img_buffer, format='PNG')
+                        img_bytes = img_buffer.getvalue()
+                        generated_images.append(img_bytes)
+                    
+                    if generated_images:
+                        # Store images in session state
+                        if len(generated_images) == 1:
                             st.session_state['messages'].append({
                                 'role': 'assistant',
                                 'type': 'image',
-                                'content': image_base64,
-                                'caption': f"Generated: {prompt}"
+                                'content': generated_images[0],
+                                'caption': f"Generated with {model}"
                             })
-                            
-                            # Display immediately
-                            st.image(
-                                base64.b64decode(image_base64),
-                                caption=f"Generated: {prompt}",
-                                use_container_width=True
-                            )
-                            
+                            # Display single image
+                            st.image(generated_images[0], caption=f"Generated with {model}", use_container_width=True)
                             st.download_button(
                                 label="⬇️ Download Generated Image",
-                                data=base64.b64decode(image_base64),
-                                file_name=f"generated_{int(time.time())}.png",
+                                data=generated_images[0],
+                                file_name=f"imagen_generated_{int(time.time())}.png",
                                 mime="image/png"
                             )
-                            
-                            st.success("✅ Image generated successfully!")
                         else:
-                            st.error("❌ No image was generated. Please try again.")
                             st.session_state['messages'].append({
                                 'role': 'assistant',
-                                'content': 'Sorry, I was unable to generate an image. Please try again with a different prompt.'
+                                'type': 'image',
+                                'content': generated_images,
+                                'caption': f"Generated with {model}"
                             })
-                    
-                    except Exception as e:
-                        st.error(f"❌ Error generating image: {str(e)}")
+                            # Display multiple images
+                            cols = st.columns(min(len(generated_images), 3))
+                            for j, img_data in enumerate(generated_images):
+                                with cols[j % 3]:
+                                    st.image(img_data, caption=f"Image {j+1}", use_container_width=True)
+                                    st.download_button(
+                                        label="⬇️ Download",
+                                        data=img_data,
+                                        file_name=f"imagen_generated_{int(time.time())}_{j}.png",
+                                        mime="image/png",
+                                        key=f"download_current_{j}"
+                                    )
+                        
+                        st.success(f"✅ Generated {len(generated_images)} image(s) successfully!")
+                    else:
+                        st.error("❌ No images were generated.")
                         st.session_state['messages'].append({
                             'role': 'assistant',
-                            'content': f'Error generating image: {str(e)}'
+                            'content': 'Sorry, I was unable to generate images. Please try again with a different prompt.'
                         })
-    
-    # --- VISION ANALYSIS ---
-    elif 'current_image' in st.session_state:
-        with st.chat_message("assistant"):
-            with st.spinner("👁️ Analyzing image..."):
-                try:
-                    response = client.responses.create(
-                        model=model,
-                        input=[{
-                            "role": "user",
-                            "content": [
-                                {"type": "input_text", "text": user_input},
-                                {
-                                    "type": "input_image",
-                                    "image_url": st.session_state['current_image']['data_uri'],
-                                    "detail": detail_level
-                                }
-                            ]
-                        }]
-                    )
-                    
-                    reply = response.output_text
-                    st.session_state['messages'].append({'role': 'assistant', 'content': reply})
-                    st.write(reply)
                 
                 except Exception as e:
-                    error_msg = f"❌ Error analyzing image: {str(e)}"
-                    st.error(error_msg)
-                    st.session_state['messages'].append({'role': 'assistant', 'content': error_msg})
+                    st.error(f"❌ Error generating images: {str(e)}")
+                    st.session_state['messages'].append({
+                        'role': 'assistant',
+                        'content': f'Error generating images: {str(e)}'
+                    })
     
-    # --- TEXT CHAT ---
+    # --- GEMINI CONVERSATIONAL GENERATION ---
     else:
         with st.chat_message("assistant"):
-            with st.spinner("🤔 Thinking..."):
+            with st.spinner("🤖 Processing with Gemini..."):
                 try:
-                    response = client.chat.completions.create(
+                    # Prepare content for Gemini
+                    if 'current_image' in st.session_state:
+                        # Include uploaded image for editing/analysis
+                        contents = [user_input, st.session_state['current_image']]
+                    else:
+                        # Text-only input
+                        contents = user_input
+                    
+                    response = client.models.generate_content(
                         model=model,
-                        messages=[
-                            {"role": "system", "content": "You are a helpful AI assistant with vision and image generation capabilities. You can analyze images and generate new ones when requested."},
-                            {"role": "user", "content": user_input}
-                        ]
+                        contents=contents,
+                        config=types.GenerateContentConfig(
+                            response_modalities=['TEXT', 'IMAGE']
+                        )
                     )
                     
-                    reply = response.choices[0].message.content
-                    st.session_state['messages'].append({'role': 'assistant', 'content': reply})
-                    st.write(reply)
+                    # Process response parts
+                    text_response = ""
+                    generated_images = []
+                    
+                    for part in response.candidates[0].content.parts:
+                        if part.text is not None:
+                            text_response += part.text
+                        elif part.inline_data is not None:
+                            # Convert inline data to bytes
+                            img_buffer = io.BytesIO()
+                            image = Image.open(io.BytesIO(part.inline_data.data))
+                            image.save(img_buffer, format='PNG')
+                            img_bytes = img_buffer.getvalue()
+                            generated_images.append(img_bytes)
+                    
+                    # Display text response
+                    if text_response:
+                        st.write(text_response)
+                        st.session_state['messages'].append({
+                            'role': 'assistant',
+                            'content': text_response
+                        })
+                    
+                    # Display generated images
+                    if generated_images:
+                        for i, img_data in enumerate(generated_images):
+                            st.image(img_data, caption=f"Generated Image {i+1}", use_container_width=True)
+                            st.download_button(
+                                label=f"⬇️ Download Image {i+1}",
+                                data=img_data,
+                                file_name=f"gemini_generated_{int(time.time())}_{i}.png",
+                                mime="image/png",
+                                key=f"download_gemini_{i}"
+                            )
+                        
+                        st.session_state['messages'].append({
+                            'role': 'assistant',
+                            'type': 'image',
+                            'content': generated_images if len(generated_images) > 1 else generated_images[0],
+                            'caption': 'Generated with Gemini'
+                        })
+                    
+                    if not text_response and not generated_images:
+                        st.warning("⚠️ No text or images were generated. Try being more explicit about wanting images.")
+                        st.session_state['messages'].append({
+                            'role': 'assistant',
+                            'content': 'I didn\'t generate any content. Try asking for images explicitly, like "generate an image of..." or "create a picture showing..."'
+                        })
                 
                 except Exception as e:
-                    error_msg = f"❌ Error: {str(e)}"
-                    st.error(error_msg)
-                    st.session_state['messages'].append({'role': 'assistant', 'content': error_msg})
+                    st.error(f"❌ Error with Gemini: {str(e)}")
+                    st.session_state['messages'].append({
+                        'role': 'assistant',
+                        'content': f'Error: {str(e)}'
+                    })
 
 # --- Footer ---
 st.sidebar.markdown("---")
@@ -293,5 +352,22 @@ if st.sidebar.button("🚪 Logout"):
 st.sidebar.markdown("---")
 st.sidebar.markdown(f"**Model:** {model}")
 st.sidebar.markdown(f"**Messages:** {len(st.session_state['messages'])}")
-if 'current_image' in st.session_state:
-    st.sidebar.markdown(f"**Image:** {st.session_state['current_image']['filename']}")
+if model_type == "Gemini (Vision & Generation)" and 'current_image' in st.session_state:
+    st.sidebar.markdown("**Image:** Uploaded ✅")
+
+# Model comparison info
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 📊 Model Comparison")
+st.sidebar.markdown("""
+**Gemini:**
+- Conversational AI
+- Context understanding
+- Multi-turn editing
+- World knowledge
+
+**Imagen:**
+- Photorealistic quality
+- Artistic styles
+- Multiple images
+- Specialized editing
+""")
