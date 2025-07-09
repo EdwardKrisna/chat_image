@@ -17,7 +17,7 @@ if not st.session_state['logged_in']:
     if st.button("Login"):
         if user == st.secrets["user"] and pwd == st.secrets["password"]:
             st.session_state['logged_in'] = True
-            st.rerun()
+            st.rerun()  
         else:
             st.error("Invalid credentials, please try again.")
     st.stop()
@@ -27,18 +27,14 @@ openai.api_key = st.secrets["api_key"]
 
 st.sidebar.title("Settings")
 model = st.sidebar.selectbox(
-    "Choose model", 
+    "Choose model",
     ["gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano"]
 )
 
 # Upload an image for vision analysis
-uploaded_file = st.sidebar.file_uploader(
-    "Upload an image", type=["png", "jpg", "jpeg"]
-)
-
+uploaded_file = st.sidebar.file_uploader("Upload an image", type=["png", "jpg", "jpeg"])
 if uploaded_file:
     st.sidebar.image(uploaded_file, caption="Uploaded image", use_column_width=True)
-    # Convert to base64 data URI
     img_bytes = uploaded_file.read()
     b64 = base64.b64encode(img_bytes).decode('utf-8')
     st.session_state['image_data_uri'] = f"data:image/png;base64,{b64}"
@@ -49,49 +45,47 @@ else:
 if 'messages' not in st.session_state:
     st.session_state['messages'] = []
 
-# Display chat messages
+# Display existing messages
 for msg in st.session_state['messages']:
     with st.chat_message(msg['role']):
         st.write(msg['content'])
 
-# Chat input
+# Handle new input
 user_input = st.chat_input("Your message...")
 if user_input:
     st.session_state['messages'].append({'role': 'user', 'content': user_input})
-    # Decide between image generation or vision chat
+
+    # IMAGE GENERATION COMMAND
     if user_input.lower().startswith("/generate "):
-        prompt = user_input[len("/generate "):]
-        img_resp = openai.Image.create(
-            prompt=prompt,
-            n=1,
-            size="512x512"
-        )
+        prompt = user_input[len("/generate "):].strip()
+        img_resp = openai.Image.create(prompt=prompt, n=1, size="512x512")
         img_url = img_resp['data'][0]['url']
-        st.session_state['messages'].append({'role': 'assistant', 'content': f"![generated_image]({img_url})"})
+        st.session_state['messages'].append({
+            'role': 'assistant',
+            'content': f"![generated]({img_url})"
+        })
         st.image(img_url, caption="Generated Image")
-        # Download button
         img_data = requests.get(img_url).content
-        st.download_button(
-            label="Download Generated Image",
-            data=img_data,
-            file_name="generated.png",
-            mime="image/png"
-        )
+        st.download_button("Download Generated Image", img_data, "generated.png", "image/png")
+
+    # VISION-CAPABLE OR TEXT-ONLY CHAT
     else:
-        # Prepare chat messages for vision-capable model
-        api_msgs = [
-            {"role": "system", "content": "You are a helpful assistant that can analyze images and chat."}
-        ]
+        system_msg = {"role": "system", "content": "You are a helpful assistant that can analyze images and chat."}
+        # Build a single user message: text + optional image_url
         if 'image_data_uri' in st.session_state:
-            api_msgs.append({
-                "type": "image_url",
-                "image_url": {"url": st.session_state['image_data_uri']}
-            })
-        api_msgs.append({"type": "text", "text": user_input})
+            user_msg = {
+                "role": "user",
+                "content": [
+                    {"type": "text",      "text": user_input},
+                    {"type": "image_url", "image_url": {"url": st.session_state['image_data_uri']}}
+                ]
+            }
+        else:
+            user_msg = {"role": "user", "content": user_input}
 
         resp = openai.ChatCompletion.create(
             model=model,
-            messages=api_msgs
+            messages=[system_msg, user_msg]
         )
         assistant_msg = resp.choices[0].message.content
         st.session_state['messages'].append({'role': 'assistant', 'content': assistant_msg})
